@@ -7,11 +7,12 @@ import json
 from typing import Any, Coroutine, List, Literal, Optional, Tuple, Union, overload
 import httpx
 
-from litellm import DualCache, verbose_logger
+from litellm import verbose_logger
 from litellm.secret_managers.main import get_secret_str, get_secret
 from litellm.types.llms.openai import AllMessageValues
 from datetime import datetime, timedelta
 
+from .. import sap_token_cache
 from ..common_utils import SAPOAuthToken
 from ...openai.chat.gpt_transformation import OpenAIGPTConfig
 
@@ -61,7 +62,7 @@ class SAPChatConfig(OpenAIGPTConfig):
         for key, value in locals_.items():
             if key != "self" and value is not None:
                 setattr(self.__class__, key, value)
-        self.token_cache = DualCache()
+        self.token_cache = sap_token_cache
     @classmethod
     def get_config(cls):
         return super().get_config()

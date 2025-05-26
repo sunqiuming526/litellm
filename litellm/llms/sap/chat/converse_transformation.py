@@ -12,7 +12,7 @@ from typing import List, Literal, Optional, Tuple, Union, cast, overload, Iterat
 import httpx
 
 import litellm
-from litellm import verbose_logger, DualCache
+from litellm import verbose_logger
 from litellm.litellm_core_utils.core_helpers import map_finish_reason
 from litellm.litellm_core_utils.litellm_logging import Logging
 from litellm.litellm_core_utils.llm_response_utils.convert_dict_to_response import (
@@ -50,6 +50,7 @@ from litellm.types.utils import (
     Usage, ModelResponseStream, StreamingChoices, Delta,
 )
 from litellm.utils import add_dummy_tool, has_tool_call_blocks, supports_reasoning
+from .. import sap_token_cache
 from ..common_utils import SAPOAuthToken
 from ...base_llm.base_model_iterator import BaseModelResponseIterator
 from ...bedrock.chat.converse_transformation import AmazonConverseConfig
@@ -74,7 +75,7 @@ class SAPConverseConfig(AmazonConverseConfig):
     def __init__(self, maxTokens: Optional[int] = None, stopSequences: Optional[List[str]] = None,
                  temperature: Optional[int] = None, topP: Optional[int] = None, topK: Optional[int] = None) -> None:
         super().__init__(maxTokens, stopSequences, temperature, topP, topK)
-        self.token_cache = DualCache()
+        self.token_cache = sap_token_cache
 
     def _transform_request_helper(
         self,
