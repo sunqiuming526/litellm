@@ -129,6 +129,7 @@ class SAPConverseConfig(AmazonConverseConfig):
 
         if "thinking" in model:
             inference_params.pop('topP', None)
+            inference_params['temperature'] = 1
 
         # Only set the topK value in for models that support it
         additional_request_params.update(

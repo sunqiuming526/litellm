@@ -6,6 +6,7 @@ services:
       args:
         target: runtime
     image: litellm_test_image
+    restart: always
     #########################################
     ## Uncomment these lines to start proxy with a config.yaml file ##
     volumes:
