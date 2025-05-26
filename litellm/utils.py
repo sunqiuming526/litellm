@@ -3477,7 +3477,17 @@ def get_optional_params(  # noqa: PLR0915
                 else False
             ),
         )
-    elif custom_llm_provider ==  "sap-claude":
+    elif custom_llm_provider == "sap":
+        optional_params = litellm.SAPChatConfig().map_openai_params(non_default_params=non_default_params,
+            optional_params=optional_params,
+            model=model,
+            drop_params=(
+                drop_params
+                if drop_params is not None and isinstance(drop_params, bool)
+                else False
+            ),
+        )
+    elif custom_llm_provider == "sap-claude":
         optional_params = litellm.SAPConverseConfig().map_openai_params(non_default_params=non_default_params,
             optional_params=optional_params,
             model=model,

@@ -75,7 +75,7 @@ class SAPChatConfig(OpenAIGPTConfig):
         base_params = super().get_supported_openai_params(model)
 
         # Remove parameters not supported by SAP AI Core
-        unsupported_params = ["max_retries", "logit_bias", "functions", "function_call"]
+        unsupported_params = ["max_retries", "logit_bias"]
         for param in unsupported_params:
             if param in base_params:
                 base_params.remove(param)
