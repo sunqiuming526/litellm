@@ -227,10 +227,13 @@ def get_llm_provider(  # noqa: PLR0915
                         dynamic_api_key = api_key or get_secret_str("LLAMA_API_KEY")
                     elif endpoint == "https://api.featherless.ai/v1":
                         custom_llm_provider = "featherless_ai"
-                        dynamic_api_key = get_secret_str("FEATHERLESS_AI_API_KEY")                    
+                        dynamic_api_key = get_secret_str("FEATHERLESS_AI_API_KEY")
                     elif endpoint == litellm.NscaleConfig.API_BASE_URL:
                         custom_llm_provider = "nscale"
                         dynamic_api_key = litellm.NscaleConfig.get_api_key()
+                    elif endpoint == "dashscope-intl.aliyuncs.com/compatible-mode/v1":
+                        custom_llm_provider = "dashscope"
+                        dynamic_api_key = get_secret_str("DASHSCOPE_API_KEY")
 
                     if api_base is not None and not isinstance(api_base, str):
                         raise Exception(
@@ -338,6 +341,9 @@ def get_llm_provider(  # noqa: PLR0915
             custom_llm_provider = "empower"
         elif model == "*":
             custom_llm_provider = "openai"
+        # bytez models
+        elif model.startswith("bytez/"):
+            custom_llm_provider = "bytez"
         if not custom_llm_provider:
             if litellm.suppress_debug_info is False:
                 print()  # noqa
@@ -467,6 +473,13 @@ def _get_openai_compatible_provider_info(  # noqa: PLR0915
             or "https://api.llama.com/compat/v1"
         )  # type: ignore
         dynamic_api_key = api_key or get_secret_str("LLAMA_API_KEY")
+    elif custom_llm_provider == "nebius":
+        api_base = (
+            api_base
+            or get_secret("NEBIUS_API_BASE")
+            or "https://api.studio.nebius.ai/v1"
+        )  # type: ignore
+        dynamic_api_key = api_key or get_secret_str("NEBIUS_API_KEY")
     elif (custom_llm_provider == "ai21_chat") or (
         custom_llm_provider == "ai21" and model in litellm.ai21_chat_models
     ):
@@ -505,6 +518,14 @@ def _get_openai_compatible_provider_info(  # noqa: PLR0915
             api_base,
             dynamic_api_key,
         ) = litellm.LlamafileChatConfig()._get_openai_compatible_provider_info(
+            api_base, api_key
+        )
+    elif custom_llm_provider == "datarobot":
+        # DataRobot is OpenAI compatible.
+        (
+            api_base,
+            dynamic_api_key
+        ) = litellm.DataRobotConfig()._get_openai_compatible_provider_info(
             api_base, api_key
         )
     elif custom_llm_provider == "lm_studio":
@@ -607,6 +628,14 @@ def _get_openai_compatible_provider_info(  # noqa: PLR0915
             or "https://api.galadriel.com/v1"
         )  # type: ignore
         dynamic_api_key = api_key or get_secret_str("GALADRIEL_API_KEY")
+    elif custom_llm_provider == "github_copilot":
+        (
+            api_base,
+            dynamic_api_key,
+            custom_llm_provider,
+        ) = litellm.GithubCopilotConfig()._get_openai_compatible_provider_info(
+            model, api_base, api_key, custom_llm_provider
+        )
     elif custom_llm_provider == "novita":
         api_base = (
             api_base
@@ -627,7 +656,7 @@ def _get_openai_compatible_provider_info(  # noqa: PLR0915
             dynamic_api_key,
         ) = litellm.FeatherlessAIConfig()._get_openai_compatible_provider_info(
             api_base, api_key
-        )    
+        )
     elif custom_llm_provider == "nscale":
         (
             api_base,
@@ -635,6 +664,13 @@ def _get_openai_compatible_provider_info(  # noqa: PLR0915
         ) = litellm.NscaleConfig()._get_openai_compatible_provider_info(
             api_base=api_base, api_key=api_key
         )
+    elif custom_llm_provider == "dashscope":
+        (
+            api_base,
+            dynamic_api_key,
+        ) = litellm.DashScopeChatConfig()._get_openai_compatible_provider_info(
+            api_base, api_key
+        )    
 
     if api_base is not None and not isinstance(api_base, str):
         raise Exception("api base needs to be a string. api_base={}".format(api_base))
