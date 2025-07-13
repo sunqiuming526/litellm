@@ -147,13 +147,13 @@ class SAPChatConfig(OpenAIGPTConfig):
         Some SAP deployments might not support streaming with certain features.
         """
         # SAP AI Core might not support streaming with response_format
-        if optional_params.get("response_format") is not None:
-            return True
-
-        # SAP AI Core might not support streaming with certain tool configurations
-        if optional_params.get("tools") is not None and len(optional_params.get("tools", [])) > 5:
-            # Fake stream if using many tools (arbitrary limit for example)
-            return True
+        # if optional_params.get("response_format") is not None:
+        #     return True
+        #
+        # # SAP AI Core might not support streaming with certain tool configurations
+        # if optional_params.get("tools") is not None and len(optional_params.get("tools", [])) > 5:
+        #     # Fake stream if using many tools (arbitrary limit for example)
+        #     return True
 
         return False
 
