@@ -59,9 +59,6 @@ from litellm.integrations.custom_logger import CustomLogger
 from litellm.integrations.deepeval.deepeval import DeepEvalLogger
 from litellm.integrations.mlflow import MlflowLogger
 from litellm.integrations.sqs import SQSLogger
-from litellm.integrations.vector_store_integrations.bedrock_vector_store import (
-    BedrockVectorStore,
-)
 from litellm.litellm_core_utils.get_litellm_params import get_litellm_params
 from litellm.litellm_core_utils.llm_cost_calc.tool_call_cost_tracking import (
     StandardBuiltInToolCostTracking,
@@ -123,6 +120,7 @@ from ..integrations.azure_storage.azure_storage import AzureBlobStorageLogger
 from ..integrations.custom_prompt_management import CustomPromptManagement
 from ..integrations.datadog.datadog import DataDogLogger
 from ..integrations.datadog.datadog_llm_obs import DataDogLLMObsLogger
+from ..integrations.dotprompt import DotpromptManager
 from ..integrations.dynamodb import DyanmoDBLogger
 from ..integrations.galileo import GalileoObserve
 from ..integrations.gcs_bucket.gcs_bucket import GCSBucketLogger
@@ -141,7 +139,6 @@ from ..integrations.logfire_logger import LogfireLevel, LogfireLogger
 from ..integrations.lunary import LunaryLogger
 from ..integrations.openmeter import OpenMeterLogger
 from ..integrations.opik.opik import OpikLogger
-from ..integrations.prometheus import PrometheusLogger
 from ..integrations.prompt_layer import PromptLayerLogger
 from ..integrations.s3 import S3Logger
 from ..integrations.s3_v2 import S3Logger as S3V2Logger
@@ -171,6 +168,7 @@ try:
     from litellm_enterprise.enterprise_callbacks.send_emails.smtp_email import (
         SMTPEmailLogger,
     )
+    from litellm_enterprise.integrations.prometheus import PrometheusLogger
     from litellm_enterprise.litellm_core_utils.litellm_logging import (
         StandardLoggingPayloadSetup as EnterpriseStandardLoggingPayloadSetup,
     )
@@ -188,6 +186,7 @@ except Exception as e:
     PagerDutyAlerting = CustomLogger  # type: ignore
     EnterpriseCallbackControls = None  # type: ignore
     EnterpriseStandardLoggingPayloadSetupVAR = None
+    PrometheusLogger = None
 _in_memory_loggers: List[Any] = []
 
 ### GLOBAL VARIABLES ###
@@ -505,6 +504,15 @@ class Logging(LiteLLMLoggingBaseClass):
         if "custom_llm_provider" in self.model_call_details:
             self.custom_llm_provider = self.model_call_details["custom_llm_provider"]
 
+    def update_messages(self, messages: List[AllMessageValues]):
+        """
+        Update the logged value of the messages in the model_call_details
+
+        Allows pre-call hooks to update the messages before the call is made
+        """
+        self.messages = messages
+        self.model_call_details["messages"] = messages
+
     def should_run_prompt_management_hooks(
         self,
         non_default_params: Dict,
@@ -600,7 +608,7 @@ class Logging(LiteLLMLoggingBaseClass):
         custom_logger = (
             prompt_management_logger
             or self.get_custom_logger_for_prompt_management(
-                model=model, non_default_params=non_default_params
+                model=model, tools=tools, non_default_params=non_default_params
             )
         )
 
@@ -625,7 +633,7 @@ class Logging(LiteLLMLoggingBaseClass):
         return model, messages, non_default_params
 
     def get_custom_logger_for_prompt_management(
-        self, model: str, non_default_params: Dict
+        self, model: str, non_default_params: Dict, tools: Optional[List[Dict]] = None
     ) -> Optional[CustomLogger]:
         """
         Get a custom logger for prompt management based on model name or available callbacks.
@@ -672,21 +680,16 @@ class Logging(LiteLLMLoggingBaseClass):
         # Vector Store / Knowledge Base hooks
         #########################################################
         if litellm.vector_store_registry is not None:
-            if vector_store_to_run := litellm.vector_store_registry.get_vector_store_to_run(
-                non_default_params=non_default_params
-            ):
-                vector_store_custom_logger = (
-                    litellm.ProviderConfigManager.get_provider_vector_store_config(
-                        provider=cast(
-                            litellm.LlmProviders,
-                            vector_store_to_run.get("custom_llm_provider"),
-                        ),
-                    )
-                )
-                self.model_call_details["prompt_integration"] = (
-                    vector_store_custom_logger.__class__.__name__
-                )
-                return vector_store_custom_logger
+
+            vector_store_custom_logger = _init_custom_logger_compatible_class(
+                logging_integration="vector_store_pre_call_hook",
+                internal_usage_cache=None,
+                llm_router=None,
+            )
+            self.model_call_details["prompt_integration"] = (
+                vector_store_custom_logger.__class__.__name__
+            )
+            return vector_store_custom_logger
 
         return None
 
@@ -949,7 +952,8 @@ class Logging(LiteLLMLoggingBaseClass):
         if additional_args.get("request_str", None) is not None:
             # print the sagemaker / bedrock client request
             curl_command = "\nRequest Sent from LiteLLM:\n"
-            curl_command += additional_args.get("request_str", None)
+            request_str = additional_args.get("request_str", "")
+            curl_command += request_str
         elif api_base == "":
             curl_command = str(self.model_call_details)
         return curl_command
@@ -1317,8 +1321,10 @@ class Logging(LiteLLMLoggingBaseClass):
         # Check for dynamically disabled callbacks via headers
         if (
             EnterpriseCallbackControls is not None
-            and EnterpriseCallbackControls.is_callback_disabled_via_headers(
-                callback, litellm_params
+            and EnterpriseCallbackControls.is_callback_disabled_dynamically(
+                callback=callback,
+                litellm_params=litellm_params,
+                standard_callback_dynamic_params=self.standard_callback_dynamic_params,
             )
         ):
             verbose_logger.debug(
@@ -2267,15 +2273,20 @@ class Logging(LiteLLMLoggingBaseClass):
                             start_time=start_time,
                             end_time=end_time,
                         )
+
                 if isinstance(callback, CustomLogger):  # custom logger class
+                    model_call_details: Dict = self.model_call_details
+                    ##################################
+                    # call redaction hook for custom logger
+                    model_call_details = callback.redact_standard_logging_payload_from_model_call_details(
+                        model_call_details=model_call_details
+                    )
+                    ##################################
                     if self.stream is True:
-                        if (
-                            "async_complete_streaming_response"
-                            in self.model_call_details
-                        ):
+                        if "async_complete_streaming_response" in model_call_details:
                             await callback.async_log_success_event(
-                                kwargs=self.model_call_details,
-                                response_obj=self.model_call_details[
+                                kwargs=model_call_details,
+                                response_obj=model_call_details[
                                     "async_complete_streaming_response"
                                 ],
                                 start_time=start_time,
@@ -2283,14 +2294,14 @@ class Logging(LiteLLMLoggingBaseClass):
                             )
                         else:
                             await callback.async_log_stream_event(  # [TODO]: move this to being an async log stream event function
-                                kwargs=self.model_call_details,
+                                kwargs=model_call_details,
                                 response_obj=result,
                                 start_time=start_time,
                                 end_time=end_time,
                             )
                     else:
                         await callback.async_log_success_event(
-                            kwargs=self.model_call_details,
+                            kwargs=model_call_details,
                             response_obj=result,
                             start_time=start_time,
                             end_time=end_time,
@@ -3136,6 +3147,7 @@ def set_callbacks(callback_list, function_id=None):  # noqa: PLR0915
                 customLogger = CustomLogger()
     except Exception as e:
         raise e
+    return None
 
 
 def _init_custom_logger_compatible_class(  # noqa: PLR0915
@@ -3210,6 +3222,8 @@ def _init_custom_logger_compatible_class(  # noqa: PLR0915
             _in_memory_loggers.append(_literalai_logger)
             return _literalai_logger  # type: ignore
         elif logging_integration == "prometheus":
+            if PrometheusLogger is None:
+                raise ValueError("PrometheusLogger is not initialized")
             for callback in _in_memory_loggers:
                 if isinstance(callback, PrometheusLogger):
                     return callback  # type: ignore
@@ -3480,13 +3494,17 @@ def _init_custom_logger_compatible_class(  # noqa: PLR0915
             anthropic_cache_control_hook = AnthropicCacheControlHook()
             _in_memory_loggers.append(anthropic_cache_control_hook)
             return anthropic_cache_control_hook  # type: ignore
-        elif logging_integration == "bedrock_vector_store":
+        elif logging_integration == "vector_store_pre_call_hook":
+            from litellm.integrations.vector_store_integrations.vector_store_pre_call_hook import (
+                VectorStorePreCallHook,
+            )
+
             for callback in _in_memory_loggers:
-                if isinstance(callback, BedrockVectorStore):
+                if isinstance(callback, VectorStorePreCallHook):
                     return callback
-            bedrock_vector_store = BedrockVectorStore()
-            _in_memory_loggers.append(bedrock_vector_store)
-            return bedrock_vector_store  # type: ignore
+            vector_store_pre_call_hook = VectorStorePreCallHook()
+            _in_memory_loggers.append(vector_store_pre_call_hook)
+            return vector_store_pre_call_hook  # type: ignore
         elif logging_integration == "gcs_pubsub":
             for callback in _in_memory_loggers:
                 if isinstance(callback, GcsPubSubLogger):
@@ -3523,11 +3541,21 @@ def _init_custom_logger_compatible_class(  # noqa: PLR0915
             humanloop_logger = HumanloopLogger()
             _in_memory_loggers.append(humanloop_logger)
             return humanloop_logger  # type: ignore
+        elif logging_integration == "dotprompt":
+            for callback in _in_memory_loggers:
+                if isinstance(callback, DotpromptManager):
+                    return callback
+
+            dotprompt_logger = DotpromptManager()
+            _in_memory_loggers.append(dotprompt_logger)
+            return dotprompt_logger  # type: ignore
+        return None
     except Exception as e:
         verbose_logger.exception(
             f"[Non-Blocking Error] Error initializing custom logger: {e}"
         )
         return None
+    return None
 
 
 def get_custom_logger_compatible_class(  # noqa: PLR0915
@@ -3568,7 +3596,7 @@ def get_custom_logger_compatible_class(  # noqa: PLR0915
             for callback in _in_memory_loggers:
                 if isinstance(callback, LiteralAILogger):
                     return callback
-        elif logging_integration == "prometheus":
+        elif logging_integration == "prometheus" and PrometheusLogger is not None:
             for callback in _in_memory_loggers:
                 if isinstance(callback, PrometheusLogger):
                     return callback
@@ -3667,9 +3695,13 @@ def get_custom_logger_compatible_class(  # noqa: PLR0915
             for callback in _in_memory_loggers:
                 if isinstance(callback, AnthropicCacheControlHook):
                     return callback
-        elif logging_integration == "bedrock_vector_store":
+        elif logging_integration == "vector_store_pre_call_hook":
+            from litellm.integrations.vector_store_integrations.vector_store_pre_call_hook import (
+                VectorStorePreCallHook,
+            )
+
             for callback in _in_memory_loggers:
-                if isinstance(callback, BedrockVectorStore):
+                if isinstance(callback, VectorStorePreCallHook):
                     return callback
         elif logging_integration == "gcs_pubsub":
             for callback in _in_memory_loggers:

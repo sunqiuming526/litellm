@@ -66,9 +66,6 @@ from litellm.litellm_core_utils.health_check_utils import (
     _filter_model_params,
 )
 from litellm.litellm_core_utils.litellm_logging import Logging as LiteLLMLoggingObj
-from litellm.litellm_core_utils.llm_request_utils import (
-    pick_cheapest_chat_models_from_llm_provider,
-)
 from litellm.litellm_core_utils.mock_functions import (
     mock_embedding,
     mock_image_generation,
@@ -110,6 +107,7 @@ from litellm.utils import (
     supports_httpx_timeout,
     token_counter,
     validate_and_fix_openai_messages,
+    validate_and_fix_openai_tools,
     validate_chat_completion_tool_choice,
 )
 
@@ -150,10 +148,12 @@ from .llms.custom_httpx.llm_http_handler import BaseLLMHTTPHandler
 from .llms.custom_llm import CustomLLM, custom_chat_llm_router
 from .llms.databricks.embed.handler import DatabricksEmbeddingHandler
 from .llms.deprecated_providers import aleph_alpha, palm
+from .llms.gemini.common_utils import get_api_key_from_env
 from .llms.groq.chat.handler import GroqChatCompletion
 from .llms.sap.chat.handler import SAPOpenAILikeChatCompletion
 from .llms.huggingface.embedding.handler import HuggingFaceEmbedding
 from .llms.nlp_cloud.chat.handler import completion as nlp_cloud_chat_completion
+from .llms.oci.chat.transformation import OCIChatConfig
 from .llms.ollama.completion import handler as ollama
 from .llms.oobabooga.chat import oobabooga
 from .llms.openai.completion.handler import OpenAITextCompletion
@@ -256,6 +256,7 @@ base_llm_http_handler = BaseLLMHTTPHandler()
 base_llm_aiohttp_handler = BaseLLMAIOHTTPHandler()
 sagemaker_chat_completion = SagemakerChatHandler()
 bytez_transformation = BytezChatConfig()
+oci_transformation = OCIChatConfig()
 ####### COMPLETION ENDPOINTS ################
 
 
@@ -967,6 +968,7 @@ def completion(  # type: ignore # noqa: PLR0915
         raise ValueError("model param not passed in.")
     # validate messages
     messages = validate_and_fix_openai_messages(messages=messages)
+    tools = validate_and_fix_openai_tools(tools=tools)
     # validate tool_choice
     tool_choice = validate_chat_completion_tool_choice(tool_choice=tool_choice)
     ######### unpacking kwargs #####################
@@ -1053,11 +1055,13 @@ def completion(  # type: ignore # noqa: PLR0915
     non_default_params = get_non_default_completion_params(kwargs=kwargs)
     litellm_params = {}  # used to prevent unbound var errors
     ## PROMPT MANAGEMENT HOOKS ##
+
     if isinstance(litellm_logging_obj, LiteLLMLoggingObj) and (
         litellm_logging_obj.should_run_prompt_management_hooks(
             prompt_id=prompt_id, non_default_params=non_default_params
         )
     ):
+
         (
             model,
             messages,
@@ -2445,6 +2449,24 @@ def completion(  # type: ignore # noqa: PLR0915
                 encoding=encoding,
                 stream=stream,
             )
+        elif custom_llm_provider == "oci":
+            response = base_llm_http_handler.completion(
+                model=model,
+                messages=messages,
+                headers=headers,
+                model_response=model_response,
+                api_key=api_key,
+                api_base=api_base,
+                acompletion=acompletion,
+                logging_obj=logging,
+                optional_params=optional_params,
+                litellm_params=litellm_params,
+                timeout=timeout,  # type: ignore
+                client=client,
+                custom_llm_provider=custom_llm_provider,
+                encoding=encoding,
+                stream=stream,
+            )
         elif custom_llm_provider == "oobabooga":
             custom_llm_provider = "oobabooga"
             model_response = oobabooga.completion(
@@ -2644,7 +2666,7 @@ def completion(  # type: ignore # noqa: PLR0915
 
             gemini_api_key = (
                 api_key
-                or get_secret("GEMINI_API_KEY")
+                or get_api_key_from_env()
                 or get_secret("PALM_API_KEY")  # older palm api key should also work
                 or litellm.api_key
             )
@@ -2971,7 +2993,7 @@ def completion(  # type: ignore # noqa: PLR0915
                     acompletion=acompletion,
                     client=client,
                     api_base=api_base,
-                    api_key=api_key
+                    api_key=api_key,
                 )
             elif bedrock_route == "converse_like":
                 model = model.replace("converse_like/", "")
@@ -3352,7 +3374,7 @@ def completion(  # type: ignore # noqa: PLR0915
                 custom_llm_provider=custom_llm_provider,
                 encoding=encoding,
                 stream=stream,
-                provider_config=bytez_transformation
+                provider_config=bytez_transformation,
             )
 
             pass
@@ -3532,13 +3554,13 @@ async def acompletion_with_retries(*args, **kwargs):
     retry_strategy = kwargs.pop("retry_strategy", "constant_retry")
     original_function = kwargs.pop("original_function", completion)
     if retry_strategy == "exponential_backoff_retry":
-        retryer = tenacity.Retrying(
+        retryer = tenacity.AsyncRetrying(
             wait=tenacity.wait_exponential(multiplier=1, max=10),
             stop=tenacity.stop_after_attempt(num_retries),
             reraise=True,
         )
     else:
-        retryer = tenacity.Retrying(
+        retryer = tenacity.AsyncRetrying(
             stop=tenacity.stop_after_attempt(num_retries), reraise=True
         )
     return await retryer(original_function, *args, **kwargs)
@@ -3944,6 +3966,9 @@ def embedding(  # noqa: PLR0915
                     or get_secret_str("OPENAI_LIKE_API_KEY")
                 )
 
+            if extra_headers is not None:
+                optional_params["extra_headers"] = extra_headers
+
             ## EMBEDDING CALL
             response = openai_like_embedding.embedding(
                 model=model,
@@ -4047,9 +4072,7 @@ def embedding(  # noqa: PLR0915
                 litellm_params={},
             )
         elif custom_llm_provider == "gemini":
-            gemini_api_key = (
-                api_key or get_secret_str("GEMINI_API_KEY") or litellm.api_key
-            )
+            gemini_api_key = api_key or get_api_key_from_env() or litellm.api_key
 
             api_base = api_base or litellm.api_base or get_secret_str("GEMINI_API_BASE")
 
@@ -5480,34 +5503,6 @@ def speech(  # noqa: PLR0915
 ##### Health Endpoints #######################
 
 
-async def ahealth_check_wildcard_models(
-    model: str,
-    custom_llm_provider: str,
-    model_params: dict,
-    litellm_logging_obj: Logging,
-) -> dict:
-    # this is a wildcard model, we need to pick a random model from the provider
-    cheapest_models = pick_cheapest_chat_models_from_llm_provider(
-        custom_llm_provider=custom_llm_provider, n=3
-    )
-    if len(cheapest_models) == 0:
-        raise Exception(
-            f"Unable to health check wildcard model for provider {custom_llm_provider}. Add a model on your config.yaml or contribute here - https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json"
-        )
-    if len(cheapest_models) > 1:
-        fallback_models = cheapest_models[
-            1:
-        ]  # Pick the last 2 models from the shuffled list
-    else:
-        fallback_models = None
-    model_params["model"] = cheapest_models[0]
-    model_params["litellm_logging_obj"] = litellm_logging_obj
-    model_params["fallbacks"] = fallback_models
-    model_params["max_tokens"] = 1
-    await acompletion(**model_params)
-    return {}
-
-
 async def ahealth_check(
     model_params: dict,
     mode: Optional[
@@ -5536,7 +5531,12 @@ async def ahealth_check(
             "x-ms-region": str,
         }
     """
+    from litellm.litellm_core_utils.health_check_helpers import HealthCheckHelpers
+
     # Map modes to their corresponding health check calls
+    #########################################################
+    # Init request with tracking information
+    #########################################################
     litellm_logging_obj = Logging(
         model="",
         messages=[],
@@ -5547,6 +5547,13 @@ async def ahealth_check(
         function_id="1234",
         log_raw_request_response=True,
     )
+    model_params["litellm_logging_obj"] = litellm_logging_obj
+    model_params = (
+        HealthCheckHelpers._update_model_params_with_health_check_tracking_information(
+            model_params=model_params
+        )
+    )
+    #########################################################
     try:
         model: Optional[str] = model_params.get("model", None)
         if model is None:
@@ -5564,13 +5571,12 @@ async def ahealth_check(
         }  # don't used cached responses for making health check calls
         mode = mode or "chat"
         if "*" in model:
-            return await ahealth_check_wildcard_models(
+            return await HealthCheckHelpers.ahealth_check_wildcard_models(
                 model=model,
                 custom_llm_provider=custom_llm_provider,
                 model_params=model_params,
                 litellm_logging_obj=litellm_logging_obj,
             )
-        model_params["litellm_logging_obj"] = litellm_logging_obj
 
         mode_handlers = {
             "chat": lambda: litellm.acompletion(
@@ -5608,6 +5614,9 @@ async def ahealth_check(
                 api_base=model_params.get("api_base", None),
                 api_key=model_params.get("api_key", None),
                 api_version=model_params.get("api_version", None),
+            ),
+            "batch": lambda: litellm.alist_batches(
+                **_filter_model_params(model_params),
             ),
         }
 

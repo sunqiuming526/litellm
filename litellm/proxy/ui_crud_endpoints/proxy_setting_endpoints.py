@@ -73,15 +73,15 @@ async def add_allowed_ip(ip_address: IPAddress):
         store_model_in_db,
     )
 
+    if prisma_client is None:
+        raise Exception("No DB Connected")
+
     _allowed_ips: List = general_settings.get("allowed_ips", [])
     if ip_address.ip not in _allowed_ips:
         _allowed_ips.append(ip_address.ip)
         general_settings["allowed_ips"] = _allowed_ips
     else:
         raise HTTPException(status_code=400, detail="IP address already exists")
-
-    if prisma_client is None:
-        raise Exception("No DB Connected")
 
     if store_model_in_db is not True:
         raise HTTPException(
@@ -257,14 +257,20 @@ async def update_default_team_member_budget(
     for team in teams:
         team_id = team.team_id
         max_budget_in_team = team.max_budget_in_team
-        await update_team(
-            data=UpdateTeamRequest(
-                team_id=team_id,
-                team_member_budget=max_budget_in_team,
-            ),
-            user_api_key_dict=user_api_key_dict,
-            http_request=Request(scope={"type": "http"}),
-        )
+        try:
+            await update_team(
+                data=UpdateTeamRequest(
+                    team_id=team_id,
+                    team_member_budget=max_budget_in_team,
+                ),
+                user_api_key_dict=user_api_key_dict,
+                http_request=Request(scope={"type": "http"}),
+            )
+        except Exception as e:
+            verbose_proxy_logger.info(
+                f"Error updating team {team_id} with team member budget {max_budget_in_team} with error: {e}, skipping.."
+            )
+            continue
 
 
 async def _update_litellm_setting(
@@ -401,6 +407,7 @@ async def get_sso_settings():
         generic_userinfo_endpoint=get_env_value("GENERIC_USERINFO_ENDPOINT"),
         proxy_base_url=get_env_value("PROXY_BASE_URL"),
         user_email=proxy_admin_email,  # Get from config instead of environment
+        ui_access_mode=general_settings.get("ui_access_mode", None),
     )
 
     # Get the schema for UI display
@@ -486,8 +493,14 @@ async def update_sso_settings(sso_config: SSOConfig):
             # Update in runtime environment
             os.environ[env_var_name] = value
 
+    stored_config = config
+    if len(config["environment_variables"]) > 0:
+
+        stored_config["environment_variables"] = proxy_config._encrypt_env_variables(
+            environment_variables=config["environment_variables"]
+        )
     # Save the updated config
-    await proxy_config.save_config(new_config=config)
+    await proxy_config.save_config(new_config=stored_config)
 
     return {
         "message": "SSO settings updated successfully",

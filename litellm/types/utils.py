@@ -888,6 +888,9 @@ class Usage(CompletionUsage):
 
     server_tool_use: Optional[ServerToolUse] = None
 
+    completion_tokens_details: Optional[CompletionTokensDetailsWrapper] = None
+    """Breakdown of tokens used in a completion."""
+
     prompt_tokens_details: Optional[PromptTokensDetailsWrapper] = None
     """Breakdown of tokens used in the prompt."""
 
@@ -2086,12 +2089,14 @@ class StandardCallbackDynamicParams(TypedDict, total=False):
 
     # Logging settings
     turn_off_message_logging: Optional[bool]  # when true will not log messages
+    litellm_disabled_callbacks: Optional[List[str]]
 
 
 all_litellm_params = [
     "metadata",
     "litellm_metadata",
     "litellm_trace_id",
+    "guardrails",
     "tags",
     "acompletion",
     "aimg_generation",
@@ -2144,6 +2149,7 @@ all_litellm_params = [
     "hf_model_name",
     "model_info",
     "proxy_server_request",
+    "secret_fields",
     "preset_cache_key",
     "caching_groups",
     "ttl",
@@ -2274,6 +2280,10 @@ class LlmProviders(str, Enum):
     CODESTRAL = "codestral"
     TEXT_COMPLETION_CODESTRAL = "text-completion-codestral"
     DASHSCOPE = "dashscope"
+    MOONSHOT = "moonshot"
+    V0 = "v0"
+    MORPH = "morph"
+    LAMBDA_AI = "lambda_ai"
     DEEPSEEK = "deepseek"
     SAMBANOVA = "sambanova"
     MARITALK = "maritalk"
@@ -2310,6 +2320,12 @@ class LlmProviders(str, Enum):
     SNOWFLAKE = "snowflake"
     LLAMA = "meta_llama"
     NSCALE = "nscale"
+    PG_VECTOR = "pg_vector"
+    HYPERBOLIC = "hyperbolic"
+    RECRAFT = "recraft"
+    OCI = "oci"
+    AUTO_ROUTER = "auto_router"
+    DOTPROMPT = "dotprompt"
 
 
 # Create a set of all provider values for quick lookup
