@@ -798,4 +798,5 @@ class BaseAWSLLM:
             headers is not None and "Authorization" in headers
         ):  # prevent sigv4 from overwriting the auth header
             request_headers_dict["Authorization"] = headers["Authorization"]
+
         return request_headers_dict, request.body
