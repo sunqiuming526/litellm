@@ -200,12 +200,6 @@ class SAPChatConfig(OpenAIGPTConfig):
             drop_params=drop_params,
         )
 
-        # Additional SAP-specific parameter transformations
-        # SAP AI Core might use different parameter names
-        if "max_tokens" in mapped_params and mapped_params.get("max_tokens") is not None:
-            # Ensure max_tokens is within SAP AI Core limits (example: 4096)
-            mapped_params["max_tokens"] = min(mapped_params["max_tokens"], 4096)
-
         return mapped_params
 
     def validate_sap_params(self, optional_params: dict) -> dict:

@@ -25,6 +25,7 @@ from litellm.types.llms.anthropic import (
     ContentBlockDelta,
     ContentJsonBlockDelta,
     ContentTextBlockDelta,
+    ContentThinkingBlockDelta,
     MessageBlockDelta,
     MessageDelta,
     UsageDelta,
@@ -455,16 +456,18 @@ class LiteLLMAnthropicMessagesAdapter:
     def _translate_streaming_openai_chunk_to_anthropic_content_block(
         self, choices: List[OpenAIStreamingChoice]
     ) -> Tuple[
-        Literal["text", "tool_use"],
+        Literal["text", "thinking", "tool_use"],
         "ContentBlockContentBlockDict",
     ]:
         import uuid
 
-        from litellm.types.llms.anthropic import TextBlock, ToolUseBlock
+        from litellm.types.llms.anthropic import TextBlock, ThinkingBlock, ToolUseBlock
 
         for choice in choices:
             if choice.delta.content is not None and len(choice.delta.content) > 0:
                 return "text", TextBlock(type="text", text="")
+            elif getattr(choice.delta, 'thinking_blocks', None):
+                return "thinking", ThinkingBlock(type="thinking", thinking="")
             elif (
                 choice.delta.tool_calls is not None
                 and len(choice.delta.tool_calls) > 0
@@ -482,15 +485,19 @@ class LiteLLMAnthropicMessagesAdapter:
     def _translate_streaming_openai_chunk_to_anthropic(
         self, choices: List[OpenAIStreamingChoice]
     ) -> Tuple[
-        Literal["text_delta", "input_json_delta"],
-        Union[ContentTextBlockDelta, ContentJsonBlockDelta],
+        Literal["text_delta", "thinking_delta", "input_json_delta"],
+        Union[ContentTextBlockDelta, ContentThinkingBlockDelta, ContentJsonBlockDelta],
     ]:
 
         text: str = ""
+        thinking: str = ""
         partial_json: Optional[str] = None
         for choice in choices:
-            if choice.delta.content is not None:
+            if choice.delta.content:
                 text += choice.delta.content
+            elif getattr(choice.delta, 'thinking_blocks', None):
+                for thinking_block in choice.delta.thinking_blocks:
+                    thinking += thinking_block["thinking"]
             elif choice.delta.tool_calls is not None:
                 partial_json = ""
                 for tool in choice.delta.tool_calls:
@@ -504,6 +511,8 @@ class LiteLLMAnthropicMessagesAdapter:
             return "input_json_delta", ContentJsonBlockDelta(
                 type="input_json_delta", partial_json=partial_json
             )
+        elif thinking != "":
+            return "thinking_delta", ContentThinkingBlockDelta(type="thinking_delta", thinking=thinking)
         else:
             return "text_delta", ContentTextBlockDelta(type="text_delta", text=text)
 
