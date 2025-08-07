@@ -121,7 +121,7 @@ class SAPConverseConfig(AmazonConverseConfig):
         # keep supported params in 'inference_params', and set all model-specific params in 'additional_request_params'
 
         additional_request_params = {
-            "reasoning_config": {"type": "enabled", "budget_tokens": 10000}
+            "reasoning_config": {"type": "enabled", "budget_tokens": 4000}
         } if "thinking" in model else {}
 
         # keep supported params in 'inference_params', and set all model-specific params in 'additional_request_params'
