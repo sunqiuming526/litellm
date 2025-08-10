@@ -248,6 +248,14 @@ class ContentTextBlockDelta(TypedDict):
     type: str
     text: str
 
+class ContentThinkingBlockDelta(TypedDict):
+    """
+    'delta': {'type': 'thinking_delta', 'thinking': 'Let me think...'}
+    """
+
+    type: str
+    thinking: str
+
 
 class ContentCitationsBlockDelta(TypedDict):
     type: Literal["citations"]
@@ -295,6 +303,9 @@ class TextBlock(TypedDict):
 
     type: Literal["text"]
 
+class ThinkingBlock(TypedDict):
+    type: Literal["thinking"]
+
 
 class ContentBlockStartToolUse(TypedDict):
     type: Literal["content_block_start"]
@@ -310,7 +321,7 @@ class ContentBlockStartText(TypedDict):
     content_block: TextBlock
 
 
-ContentBlockContentBlockDict = Union[ToolUseBlock, TextBlock]
+ContentBlockContentBlockDict = Union[ToolUseBlock, TextBlock, ThinkingBlock]
 
 ContentBlockStart = Union[ContentBlockStartToolUse, ContentBlockStartText]
 
