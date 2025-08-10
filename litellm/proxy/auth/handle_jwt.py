@@ -83,7 +83,7 @@ class JWTHandler:
         self.user_api_key_cache = user_api_key_cache
         self.litellm_jwtauth = litellm_jwtauth
         self.leeway = leeway
-    
+
     @staticmethod
     def is_jwt(token: str):
         parts = token.split(".")
@@ -763,6 +763,7 @@ class JWTAuthManager:
         proxy_logging_obj: ProxyLogging,
     ) -> Tuple[Optional[str], Optional[LiteLLM_TeamTable]]:
         """Find first team with access to the requested model"""
+        from litellm.proxy.proxy_server import llm_router
 
         if not team_ids:
             if jwt_handler.litellm_jwtauth.enforce_team_based_model_access:
@@ -789,7 +790,7 @@ class JWTAuthManager:
                         or can_team_access_model(
                             model=requested_model,
                             team_object=team_object,
-                            llm_router=None,
+                            llm_router=llm_router,
                             team_model_aliases=None,
                         )
                     ):
@@ -844,6 +845,7 @@ class JWTAuthManager:
         user_api_key_cache: DualCache,
         parent_otel_span: Optional[Span],
         proxy_logging_obj: ProxyLogging,
+        route: str,
     ) -> Tuple[
         Optional[LiteLLM_UserTable],
         Optional[LiteLLM_OrganizationTable],
@@ -892,6 +894,7 @@ class JWTAuthManager:
                     user_api_key_cache=user_api_key_cache,
                     parent_otel_span=parent_otel_span,
                     proxy_logging_obj=proxy_logging_obj,
+                    route=route,
                 )
                 if end_user_id
                 else None
@@ -1133,6 +1136,7 @@ class JWTAuthManager:
             user_api_key_cache=user_api_key_cache,
             parent_otel_span=parent_otel_span,
             proxy_logging_obj=proxy_logging_obj,
+            route=route,
         )
 
         await JWTAuthManager.sync_user_role_and_teams(
