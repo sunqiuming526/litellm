@@ -7,6 +7,7 @@ import json
 from typing import Any, Coroutine, List, Literal, Optional, Tuple, Union, overload
 import httpx
 
+import litellm
 from litellm import verbose_logger
 from litellm.secret_managers.main import get_secret_str, get_secret
 from litellm.types.llms.openai import AllMessageValues
@@ -192,6 +193,32 @@ class SAPChatConfig(OpenAIGPTConfig):
             # For now, we'll keep the standard OpenAI approach
             pass
 
+        # Additional SAP-specific parameter transformations
+        # SAP AI Core might use different parameter names
+        ################################################################
+        # max_tokens is not supported for gpt-5 models on OpenAI API
+        # Relevant issue: https://github.com/BerriAI/litellm/issues/13381
+        ################################################################
+        # Copied from gpt_5-transformation.py
+        if "max_tokens" in non_default_params:
+            optional_params["max_completion_tokens"] = non_default_params.pop(
+                "max_tokens"
+            )
+
+        if "temperature" in non_default_params:
+            temperature_value: Optional[float] = non_default_params.pop("temperature")
+            if temperature_value is not None:
+                if temperature_value == 1:
+                    optional_params["temperature"] = temperature_value
+                elif litellm.drop_params or drop_params:
+                    pass
+                else:
+                    raise litellm.utils.UnsupportedParamsError(
+                        message=(
+                            "gpt-5 models don't support temperature={}. Only temperature=1 is supported. To drop unsupported params set `litellm.drop_params = True`"
+                        ).format(temperature_value),
+                        status_code=400
+                    )
         # Call parent method to handle standard OpenAI parameter mapping
         mapped_params = super().map_openai_params(
             non_default_params=non_default_params,
@@ -199,15 +226,6 @@ class SAPChatConfig(OpenAIGPTConfig):
             model=model,
             drop_params=drop_params,
         )
-
-        # Additional SAP-specific parameter transformations
-        # SAP AI Core might use different parameter names
-        if "max_tokens" in mapped_params and mapped_params.get("max_tokens") is not None:
-            # Map deprecated max_tokens to max_completion_tokens
-            max_tokens_value = mapped_params.pop("max_tokens")
-            # Ensure max_tokens is within SAP AI Core limits (example: 4096)
-            mapped_params["max_completion_tokens"] = max(max_tokens_value, 4096)
-
         return mapped_params
 
     def validate_sap_params(self, optional_params: dict) -> dict:
