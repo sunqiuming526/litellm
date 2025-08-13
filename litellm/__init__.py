@@ -233,6 +233,7 @@ novita_api_key: Optional[str] = None
 snowflake_key: Optional[str] = None
 gradient_ai_api_key: Optional[str] = None
 nebius_key: Optional[str] = None
+cometapi_key: Optional[str] = None
 common_cloud_provider_auth_params: dict = {
     "params": ["project", "region_name", "token"],
     "providers": ["vertex_ai", "bedrock", "watsonx", "azure", "vertex_ai_beta"],
@@ -518,6 +519,7 @@ anyscale_models: List = []
 cerebras_models: List = []
 galadriel_models: List = []
 sambanova_models: List = []
+sambanova_embedding_models: List = []
 novita_models: List = []
 assemblyai_models: List = []
 snowflake_models: List = []
@@ -535,6 +537,7 @@ morph_models: List = []
 lambda_ai_models: List = []
 hyperbolic_models: List = []
 recraft_models: List = []
+cometapi_models: List = []
 oci_models: List = []
 
 
@@ -693,6 +696,8 @@ def add_known_models():
             galadriel_models.append(key)
         elif value.get("litellm_provider") == "sambanova":
             sambanova_models.append(key)
+        elif value.get("litellm_provider") == "sambanova-embedding-models":
+            sambanova_embedding_models.append(key)
         elif value.get("litellm_provider") == "novita":
             novita_models.append(key)
         elif value.get("litellm_provider") == "nebius-chat-models":
@@ -727,6 +732,8 @@ def add_known_models():
             hyperbolic_models.append(key)
         elif value.get("litellm_provider") == "recraft":
             recraft_models.append(key)
+        elif value.get("litellm_provider") == "cometapi":
+            cometapi_models.append(key)
         elif value.get("litellm_provider") == "oci":
             oci_models.append(key)
 
@@ -818,6 +825,7 @@ model_list = (
     + morph_models
     + lambda_ai_models
     + recraft_models
+    + cometapi_models
     + oci_models
 )
 
@@ -874,7 +882,7 @@ models_by_provider: dict = {
     "anyscale": anyscale_models,
     "cerebras": cerebras_models,
     "galadriel": galadriel_models,
-    "sambanova": sambanova_models,
+    "sambanova": sambanova_models + sambanova_embedding_models,
     "novita": novita_models,
     "nebius": nebius_models + nebius_embedding_models,
     "assemblyai": assemblyai_models,
@@ -893,6 +901,7 @@ models_by_provider: dict = {
     "lambda_ai": lambda_ai_models,
     "hyperbolic": hyperbolic_models,
     "recraft": recraft_models,
+    "cometapi": cometapi_models,
     "oci": oci_models,
 }
 
@@ -927,6 +936,7 @@ all_embedding_models = (
     + vertex_embedding_models
     + fireworks_ai_embedding_models
     + nebius_embedding_models
+    + sambanova_embedding_models
 )
 
 ####### IMAGE GENERATION MODELS ###################
@@ -1181,6 +1191,7 @@ nvidiaNimEmbeddingConfig = NvidiaNimEmbeddingConfig()
 from .llms.featherless_ai.chat.transformation import FeatherlessAIConfig
 from .llms.cerebras.chat import CerebrasConfig
 from .llms.sambanova.chat import SambanovaConfig
+from .llms.sambanova.embedding.transformation import SambaNovaEmbeddingConfig
 from .llms.ai21.chat.transformation import AI21ChatConfig
 from .llms.fireworks_ai.chat.transformation import FireworksAIConfig
 from .llms.fireworks_ai.completion.transformation import FireworksAITextCompletionConfig
@@ -1200,8 +1211,9 @@ from .llms.azure.azure import (
     AzureOpenAIError,
     AzureOpenAIAssistantsAPIConfig,
 )
-
+from .llms.cometapi.chat.transformation import CometAPIConfig
 from .llms.azure.chat.gpt_transformation import AzureOpenAIConfig
+from .llms.azure.chat.gpt_5_transformation import AzureOpenAIGPT5Config
 from .llms.azure.completion.transformation import AzureOpenAITextConfig
 from .llms.hosted_vllm.chat.transformation import HostedVLLMChatConfig
 from .llms.llamafile.chat.transformation import LlamafileChatConfig
