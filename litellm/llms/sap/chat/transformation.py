@@ -203,8 +203,10 @@ class SAPChatConfig(OpenAIGPTConfig):
         # Additional SAP-specific parameter transformations
         # SAP AI Core might use different parameter names
         if "max_tokens" in mapped_params and mapped_params.get("max_tokens") is not None:
+            # Map deprecated max_tokens to max_completion_tokens
+            max_tokens_value = mapped_params.pop("max_tokens")
             # Ensure max_tokens is within SAP AI Core limits (example: 4096)
-            mapped_params["max_tokens"] = min(mapped_params["max_tokens"], 4096)
+            mapped_params["max_completion_tokens"] = max(max_tokens_value, 4096)
 
         return mapped_params
 
