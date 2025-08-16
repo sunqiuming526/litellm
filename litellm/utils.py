@@ -3856,7 +3856,8 @@ def get_optional_params(  # noqa: PLR0915
             ),
         )
     elif custom_llm_provider == "sap":
-        optional_params = litellm.SAPChatConfig().map_openai_params(non_default_params=non_default_params,
+        if litellm.SAPGPT5Config.is_model_gpt_5_model(model=model):
+            optional_params = litellm.SAPGPT5Config().map_openai_params(non_default_params=non_default_params,
             optional_params=optional_params,
             model=model,
             drop_params=(
@@ -3865,6 +3866,16 @@ def get_optional_params(  # noqa: PLR0915
                 else False
             ),
         )
+        else:
+            optional_params = litellm.SAPChatConfig().map_openai_params(non_default_params=non_default_params,
+                optional_params=optional_params,
+                model=model,
+                drop_params=(
+                    drop_params
+                    if drop_params is not None and isinstance(drop_params, bool)
+                    else False
+                ),
+            )
     elif custom_llm_provider == "sap-claude":
         optional_params = litellm.SAPConverseConfig().map_openai_params(non_default_params=non_default_params,
             optional_params=optional_params,
@@ -6805,7 +6816,10 @@ class ProviderConfigManager:
         ):
             return litellm.OpenAIGPT5Config()
         elif litellm.LlmProviders.SAP == provider:
-            return litellm.SAPChatConfig()
+            if litellm.SAPGPT5Config.is_model_gpt_5_model(model=model):
+                return litellm.SAPGPT5Config()
+            else:
+                return litellm.SAPChatConfig()
         elif litellm.LlmProviders.SAP_CLAUDE == provider:
             return litellm.SAPConverseConfig()
         elif litellm.LlmProviders.DEEPSEEK == provider:

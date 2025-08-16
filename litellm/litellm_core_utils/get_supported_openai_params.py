@@ -93,7 +93,10 @@ def get_supported_openai_params(  # noqa: PLR0915
     elif custom_llm_provider == "deepseek":
         return litellm.DeepSeekChatConfig().get_supported_openai_params(model=model)
     elif custom_llm_provider == "sap":
-        return litellm.SAPChatConfig().get_supported_openai_params(model=model)
+        if litellm.SAPGPT5Config.is_model_gpt_5_model(model=model):
+            return litellm.SAPGPT5Config().get_supported_openai_params(model=model)
+        else:
+            return litellm.SAPChatConfig().get_supported_openai_params(model=model)
     elif custom_llm_provider == "sap-claude":
         return litellm.SAPConverseConfig().get_supported_openai_params(model=model)
     elif custom_llm_provider == "cohere":

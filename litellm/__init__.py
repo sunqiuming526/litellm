@@ -1003,6 +1003,7 @@ ALL_LITELLM_RESPONSE_TYPES = [
 from .llms.bytez.chat.transformation import BytezChatConfig
 from .llms.custom_llm import CustomLLM
 from .llms.sap.chat.transformation import SAPChatConfig
+from .llms.sap.chat.gpt_5_transformation import SAPGPT5Config
 from .llms.sap.chat.converse_transformation import SAPConverseConfig
 from .llms.bedrock.chat.converse_transformation import AmazonConverseConfig
 from .llms.openai_like.chat.handler import OpenAILikeChatConfig
