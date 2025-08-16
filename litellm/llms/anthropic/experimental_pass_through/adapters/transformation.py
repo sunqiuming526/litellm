@@ -25,14 +25,12 @@ from litellm.types.llms.anthropic import (
     ContentBlockDelta,
     ContentJsonBlockDelta,
     ContentTextBlockDelta,
-    ContentThinkingBlockDelta,
     MessageBlockDelta,
     MessageDelta,
     UsageDelta,
 )
 from litellm.types.llms.anthropic_messages.anthropic_response import (
     AnthropicMessagesResponse,
-    AnthropicResponseThinkingBlock,
     AnthropicUsage,
 )
 from litellm.types.llms.openai import (
@@ -51,7 +49,7 @@ from litellm.types.llms.openai import (
     ChatCompletionToolMessage,
     ChatCompletionToolParam,
     ChatCompletionToolParamFunctionChunk,
-    ChatCompletionUserMessage, ChatCompletionThinkingBlock,
+    ChatCompletionUserMessage,
 )
 from litellm.types.utils import Choices, ModelResponse, Usage
 
@@ -103,11 +101,11 @@ class AnthropicAdapter:
         return translated_body
 
     def translate_completion_output_params(
-        self, response: ModelResponse, thinking_enabled: bool = False
+        self, response: ModelResponse
     ) -> Optional[AnthropicMessagesResponse]:
 
         return LiteLLMAnthropicMessagesAdapter().translate_openai_response_to_anthropic(
-            response=response, thinking_enabled=thinking_enabled
+            response=response
         )
 
     def translate_completion_output_params_streaming(
@@ -228,7 +226,6 @@ class LiteLLMAnthropicMessagesAdapter:
 
             ## ASSISTANT MESSAGE ##
             assistant_message_str: Optional[str] = None
-            thinking_blocks: List[ChatCompletionThinkingBlock] = []
             tool_calls: List[ChatCompletionAssistantToolCall] = []
             if m["role"] == "assistant":
                 if isinstance(m.get("content"), str):
@@ -243,9 +240,6 @@ class LiteLLMAnthropicMessagesAdapter:
                                     assistant_message_str = content.get("text", "")
                                 else:
                                     assistant_message_str += content.get("text", "")
-                            elif content.get("type") == "thinking":
-                                    thinking_block = cast(ChatCompletionThinkingBlock, content)
-                                    thinking_blocks.append(thinking_block)
                             elif content.get("type") == "tool_use":
                                 function_chunk = ChatCompletionToolCallFunctionChunk(
                                     name=content.get("name", ""),
@@ -264,7 +258,6 @@ class LiteLLMAnthropicMessagesAdapter:
                 assistant_message = ChatCompletionAssistantMessage(
                     role="assistant",
                     content=assistant_message_str,
-                    thinking_blocks=thinking_blocks
                 )
                 if len(tool_calls) > 0:
                     assistant_message["tool_calls"] = tool_calls
@@ -388,33 +381,22 @@ class LiteLLMAnthropicMessagesAdapter:
         return new_kwargs
 
     def _translate_openai_content_to_anthropic(
-        self, choices: List[Choices], thinking_enabled: bool = False
+        self, choices: List[Choices]
     ) -> List[
-        Union[
-            AnthropicResponseContentBlockText, 
-            AnthropicResponseContentBlockToolUse,
-            AnthropicResponseThinkingBlock
-        ]
+        Union[AnthropicResponseContentBlockText, AnthropicResponseContentBlockToolUse]
     ]:
         new_content: List[
             Union[
-                AnthropicResponseContentBlockText, 
-                AnthropicResponseContentBlockToolUse,
-                AnthropicResponseThinkingBlock
+                AnthropicResponseContentBlockText, AnthropicResponseContentBlockToolUse
             ]
         ] = []
-        
-        # Collect text content and tool calls separately
-        text_content: List[AnthropicResponseContentBlockText] = []
-        tool_calls_content: List[AnthropicResponseContentBlockToolUse] = []
-        
         for choice in choices:
             if (
                 choice.message.tool_calls is not None
                 and len(choice.message.tool_calls) > 0
             ):
                 for tool_call in choice.message.tool_calls:
-                    tool_calls_content.append(
+                    new_content.append(
                         AnthropicResponseContentBlockToolUse(
                             type="tool_use",
                             id=tool_call.id,
@@ -423,27 +405,11 @@ class LiteLLMAnthropicMessagesAdapter:
                         )
                     )
             elif choice.message.content is not None:
-                text_content.append(
+                new_content.append(
                     AnthropicResponseContentBlockText(
                         type="text", text=choice.message.content
                     )
                 )
-
-        # # If thinking is enabled and we have tool calls, add a thinking block first
-        # if thinking_enabled and len(tool_calls_content) > 0:
-        #     # Add a thinking block at the beginning
-        #     new_content.append(
-        #         AnthropicResponseThinkingBlock(
-        #             type="thinking",
-        #             thinking="tttest!",  # Empty thinking content as placeholder
-        #         )
-        #     )
-        #
-        # # Add text content first (if any)
-        # new_content.extend(text_content)
-        
-        # Add tool calls after text/thinking content
-        new_content.extend(tool_calls_content)
 
         return new_content
 
@@ -459,10 +425,10 @@ class LiteLLMAnthropicMessagesAdapter:
         return "end_turn"
 
     def translate_openai_response_to_anthropic(
-        self, response: ModelResponse, thinking_enabled: bool = False
+        self, response: ModelResponse
     ) -> AnthropicMessagesResponse:
         ## translate content block
-        anthropic_content = self._translate_openai_content_to_anthropic(choices=response.choices, thinking_enabled=thinking_enabled)  # type: ignore
+        anthropic_content = self._translate_openai_content_to_anthropic(choices=response.choices)  # type: ignore
         ## extract finish reason
         anthropic_finish_reason = self._translate_openai_finish_reason_to_anthropic(
             openai_finish_reason=response.choices[0].finish_reason  # type: ignore
@@ -489,18 +455,15 @@ class LiteLLMAnthropicMessagesAdapter:
     def _translate_streaming_openai_chunk_to_anthropic_content_block(
         self, choices: List[OpenAIStreamingChoice]
     ) -> Tuple[
-        Literal["text", "thinking", "tool_use"],
+        Literal["text", "tool_use"],
         "ContentBlockContentBlockDict",
     ]:
         import uuid
 
-        from litellm.types.llms.anthropic import TextBlock, ThinkingBlock, ToolUseBlock
+        from litellm.types.llms.anthropic import TextBlock, ToolUseBlock
 
         for choice in choices:
-            # Check for thinking blocks first
-            if hasattr(choice.delta, 'thinking_blocks') and choice.delta.thinking_blocks:
-                return "thinking", ThinkingBlock(type="thinking")
-            elif choice.delta.content is not None and len(choice.delta.content) > 0:
+            if choice.delta.content is not None and len(choice.delta.content) > 0:
                 return "text", TextBlock(type="text", text="")
             elif (
                 choice.delta.tool_calls is not None
@@ -519,21 +482,14 @@ class LiteLLMAnthropicMessagesAdapter:
     def _translate_streaming_openai_chunk_to_anthropic(
         self, choices: List[OpenAIStreamingChoice]
     ) -> Tuple[
-        Literal["text_delta", "thinking_delta", "input_json_delta"],
-        Union[ContentTextBlockDelta, ContentThinkingBlockDelta, ContentJsonBlockDelta],
+        Literal["text_delta", "input_json_delta"],
+        Union[ContentTextBlockDelta, ContentJsonBlockDelta],
     ]:
 
         text: str = ""
-        thinking: str = ""
         partial_json: Optional[str] = None
-        
         for choice in choices:
-            # Check for thinking blocks first
-            if hasattr(choice.delta, 'thinking_blocks') and choice.delta.thinking_blocks:
-                for thinking_block in choice.delta.thinking_blocks:
-                    if 'thinking' in thinking_block:
-                        thinking += thinking_block['thinking']
-            elif choice.delta.content is not None:
+            if choice.delta.content is not None and len(choice.delta.content) > 0:
                 text += choice.delta.content
             elif choice.delta.tool_calls is not None:
                 partial_json = ""
@@ -543,12 +499,7 @@ class LiteLLMAnthropicMessagesAdapter:
                         and tool.function.arguments is not None
                     ):
                         partial_json += tool.function.arguments
-
-        if thinking != "":
-            return "thinking_delta", ContentThinkingBlockDelta(
-                type="thinking_delta", thinking=thinking
-            )
-        elif partial_json is not None:
+        if partial_json is not None:
             return "input_json_delta", ContentJsonBlockDelta(
                 type="input_json_delta", partial_json=partial_json
             )

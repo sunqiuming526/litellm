@@ -169,8 +169,7 @@ class LiteLLMMessagesToCompletionTransformationHandler:
             else:
                 anthropic_response = (
                     ANTHROPIC_ADAPTER.translate_completion_output_params(
-                        cast(ModelResponse, completion_response),
-                        thinking_enabled=thinking is not None
+                        cast(ModelResponse, completion_response)
                     )
                 )
                 if anthropic_response is not None:
@@ -257,8 +256,7 @@ class LiteLLMMessagesToCompletionTransformationHandler:
             else:
                 anthropic_response = (
                     ANTHROPIC_ADAPTER.translate_completion_output_params(
-                        cast(ModelResponse, completion_response),
-                        thinking_enabled=thinking is not None
+                        cast(ModelResponse, completion_response)
                     )
                 )
                 if anthropic_response is not None:
