@@ -391,23 +391,23 @@ class LiteLLMAnthropicMessagesAdapter:
         self, choices: List[Choices], thinking_enabled: bool = False
     ) -> List[
         Union[
-            AnthropicResponseContentBlockText, 
+            AnthropicResponseContentBlockText,
             AnthropicResponseContentBlockToolUse,
             AnthropicResponseThinkingBlock
         ]
     ]:
         new_content: List[
             Union[
-                AnthropicResponseContentBlockText, 
+                AnthropicResponseContentBlockText,
                 AnthropicResponseContentBlockToolUse,
                 AnthropicResponseThinkingBlock
             ]
         ] = []
-        
+
         # Collect text content and tool calls separately
         text_content: List[AnthropicResponseContentBlockText] = []
         tool_calls_content: List[AnthropicResponseContentBlockToolUse] = []
-        
+
         for choice in choices:
             if (
                 choice.message.tool_calls is not None
@@ -441,7 +441,7 @@ class LiteLLMAnthropicMessagesAdapter:
         #
         # # Add text content first (if any)
         # new_content.extend(text_content)
-        
+
         # Add tool calls after text/thinking content
         new_content.extend(tool_calls_content)
 
@@ -526,14 +526,14 @@ class LiteLLMAnthropicMessagesAdapter:
         text: str = ""
         thinking: str = ""
         partial_json: Optional[str] = None
-        
+
         for choice in choices:
             # Check for thinking blocks first
             if hasattr(choice.delta, 'thinking_blocks') and choice.delta.thinking_blocks:
                 for thinking_block in choice.delta.thinking_blocks:
                     if 'thinking' in thinking_block:
                         thinking += thinking_block['thinking']
-            elif choice.delta.content is not None:
+            elif choice.delta.content is not None and len(choice.delta.content) > 0:
                 text += choice.delta.content
             elif choice.delta.tool_calls is not None:
                 partial_json = ""
