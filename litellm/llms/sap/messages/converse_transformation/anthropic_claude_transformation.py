@@ -270,6 +270,7 @@ class SAPAnthropicClaudeMessagesConverseConfig(
 
         request_openai_format = LiteLLMAnthropicMessagesAdapter().translate_anthropic_to_openai(anthropic_message_request=anthropic_messages_request)
         optional_params_openai_format = deepcopy(anthropic_messages_optional_request_params)
+        optional_params_openai_format["maxTokens"] = request_openai_format.get("max_tokens", None)
         optional_params_openai_format["tools"] = request_openai_format.get("tools", [])
 
         non_system_messages, _ = self._transform_system_message(
@@ -287,8 +288,8 @@ class SAPAnthropicClaudeMessagesConverseConfig(
                 llm_provider="bedrock_converse",
                 # user_continue_message=litellm_params.pop("user_continue_message", None),
             ))
-
         data: RequestObject = {"messages": bedrock_messages, **_data}
+
 
         return data
 

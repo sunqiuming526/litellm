@@ -129,9 +129,11 @@ class SAPConverseConfig(AmazonConverseConfig):
             k: v for k, v in inference_params.items() if k in supported_additional_request_params
         })
 
-        if (messages[-1].get("role") == 'tool'):
-            additional_request_params.pop("thinking", None)
-            additional_request_params.pop("reasoning_config", None)
+        # Note: Keep thinking/reasoning_config even when tool calls are present
+        # Anthropic API expects thinking to remain enabled throughout the conversation
+        # if (messages[-1].get("role") == 'tool'):
+        #     additional_request_params.pop("thinking", None)
+        #     additional_request_params.pop("reasoning_config", None)
 
 
         inference_params = {
