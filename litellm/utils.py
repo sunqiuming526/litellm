@@ -7097,6 +7097,8 @@ class ProviderConfigManager:
         elif litellm.LlmProviders.BEDROCK == provider:
             from litellm.llms.bedrock.common_utils import BedrockModelInfo
             return BedrockModelInfo.get_bedrock_provider_config_for_messages_api(model)
+        elif litellm.LlmProviders.SAP_CLAUDE == provider:
+            return litellm.SAPAnthropicClaudeMessagesConverseConfig()
         elif litellm.LlmProviders.VERTEX_AI == provider:
             if "claude" in model:
                 from litellm.llms.vertex_ai.vertex_ai_partner_models.anthropic.experimental_pass_through.transformation import (
