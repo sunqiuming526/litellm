@@ -3625,7 +3625,7 @@ def make_valid_bedrock_tool_name(input_tool_name: str) -> str:
         """
         Bedrock tool names only supports alpha-numeric characters and underscores
         """
-        if char.isalnum() or char == "_":
+        if char.isalnum() or char == "_" or char == "-":
             return char
         return "_"
 
