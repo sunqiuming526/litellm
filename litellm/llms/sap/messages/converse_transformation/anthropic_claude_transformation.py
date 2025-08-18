@@ -447,6 +447,12 @@ class SAPAnthropicMessagesStreamingIterator:
             litellm_logging_obj=litellm_logging_obj,
             request_body=request_body,
         )
+        
+        # Track content blocks to synthesize missing content_block_start events
+        self.seen_content_blocks = set()
+        # Buffer final events to ensure correct ordering
+        self.message_stop_event = None
+        self.metadata_event = None
     
     async def parse_sse_stream(self, byte_stream) -> AsyncIterator[dict]:
         """
@@ -454,6 +460,8 @@ class SAPAnthropicMessagesStreamingIterator:
         
         SAP returns: {'metadata': {'usage': {'inputTokens': 8, 'outputTokens': 20}}}
         Anthropic expects: {'usage': {'input_tokens': 8, 'output_tokens': 20}}
+        
+        Also handles missing content_block_start events and reorders final events.
         """
         import json
         
@@ -481,13 +489,17 @@ class SAPAnthropicMessagesStreamingIterator:
                                     # Fallback for dict-like strings: {'key': 'value'}
                                     data = eval(json_str)
                                 
-                                # Transform usage metrics if present
-                                data = self._transform_usage_metrics(data)
-                                yield data
+                                # Handle event processing with proper ordering
+                                async for event in self._process_sap_event(data):
+                                    yield event
                                 
                         except (json.JSONDecodeError, SyntaxError, ValueError) as e:
                             # Skip malformed data
                             continue
+        
+        # Yield any buffered final events
+        async for event in self._flush_final_events():
+            yield event
     
     def _transform_usage_metrics(self, data: dict) -> dict:
         """
@@ -514,6 +526,89 @@ class SAPAnthropicMessagesStreamingIterator:
         
         return data
     
+    async def _process_sap_event(self, data: dict) -> AsyncIterator[dict]:
+        """Process SAP event with proper ordering and content_block_start synthesis."""
+        # Handle messageStop and metadata events specially to ensure correct ordering
+        if 'messageStop' in data:
+            # Buffer the messageStop event
+            self.message_stop_event = data
+            return
+        
+        if 'metadata' in data:
+            # Buffer the metadata event
+            self.metadata_event = data
+            return
+        
+        # Track content blocks that have started
+        if 'contentBlockStart' in data:
+            content_block_index = data['contentBlockStart']['contentBlockIndex']
+            self.seen_content_blocks.add(content_block_index)
+        
+        # Handle contentBlockDelta - synthesize content_block_start if needed (only for blocks that SAP doesn't send contentBlockStart for)
+        if 'contentBlockDelta' in data:
+            content_block_index = data['contentBlockDelta']['contentBlockIndex'] 
+            
+            # If this is the first delta for this content block AND we haven't seen a contentBlockStart for it, synthesize content_block_start
+            if content_block_index not in self.seen_content_blocks:
+                self.seen_content_blocks.add(content_block_index)
+                
+                # Determine content block type from the delta - mainly for thinking blocks since SAP doesn't send contentBlockStart for them
+                delta = data['contentBlockDelta']['delta']
+                if 'reasoningContent' in delta:
+                    # Thinking block - SAP doesn't send contentBlockStart for these
+                    start_event = {
+                        "type": "content_block_start",
+                        "index": content_block_index,
+                        "content_block": {
+                            "type": "thinking",
+                            "thinking": "",
+                            "signature": ""
+                        }
+                    }
+                    yield start_event
+                elif 'text' in delta:
+                    # Text block - SAP might not send contentBlockStart for these
+                    start_event = {
+                        "type": "content_block_start", 
+                        "index": content_block_index,
+                        "content_block": {
+                            "type": "text",
+                            "text": ""
+                        }
+                    }
+                    yield start_event
+                # Note: Don't synthesize for toolUse since SAP sends contentBlockStart for tool_use blocks
+        
+        # Transform and yield the current event
+        data = self._transform_usage_metrics(data)
+        yield data
+    
+    async def _flush_final_events(self) -> AsyncIterator[dict]:
+        """Flush buffered final events in correct order: message_delta then message_stop."""
+        # First emit message_delta from metadata
+        if self.metadata_event:
+            transformed_usage = self._transform_usage_metrics(self.metadata_event.copy())
+            metadata = self.metadata_event.get('metadata', {})
+            stop_reason = metadata.get('stopReason', 'end_turn')
+            stop_sequence = metadata.get('stopSequence')
+            
+            message_delta_event = {
+                "type": "message_delta",
+                "delta": {
+                    "stop_reason": stop_reason,
+                    "stop_sequence": stop_sequence
+                },
+                "usage": transformed_usage.get('usage', {})
+            }
+            yield message_delta_event
+        
+        # Then emit message_stop
+        if self.message_stop_event:
+            message_stop_event = {
+                "type": "message_stop"
+            }
+            yield message_stop_event
+    
     def _convert_chunk_to_sse_format(self, chunk: Union[dict, Any]) -> bytes:
         """Transform SAP format to Anthropic SSE format."""
         if not isinstance(chunk, dict):
@@ -529,17 +624,31 @@ class SAPAnthropicMessagesStreamingIterator:
         """Transform SAP chunk format to Anthropic format."""
         # Handle messageStart -> message_start
         if 'messageStart' in sap_chunk:
+            # Extract usage info if available, otherwise use defaults
+            message_start_data = sap_chunk['messageStart']
+            usage_data = {
+                "input_tokens": 0,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "cache_creation": {
+                    "ephemeral_5m_input_tokens": 0,
+                    "ephemeral_1h_input_tokens": 0
+                },
+                "output_tokens": 1,
+                "service_tier": "standard"
+            }
+            
             return {
                 "type": "message_start",
                 "message": {
                     "id": f"msg_{abs(hash(str(sap_chunk)))}",
                     "type": "message",
-                    "role": sap_chunk['messageStart']['role'],
+                    "role": message_start_data.get('role', 'assistant'),
                     "content": [],
                     "model": "claude-sonnet-4",
                     "stop_reason": None,
                     "stop_sequence": None,
-                    "usage": {"input_tokens": 0, "output_tokens": 0}
+                    "usage": usage_data
                 }
             }
         
@@ -609,14 +718,28 @@ class SAPAnthropicMessagesStreamingIterator:
                 }
             # Handle reasoning content (thinking)
             elif 'reasoningContent' in delta:
-                return {
-                    "type": "content_block_delta",
-                    "index": content_block_index,
-                    "delta": {
-                        "type": "thinking_delta",
-                        "thinking": delta['reasoningContent'].get('text', '')
+                reasoning = delta['reasoningContent']
+                
+                # Handle signature if present
+                if 'signature' in reasoning:
+                    return {
+                        "type": "content_block_delta",
+                        "index": content_block_index,
+                        "delta": {
+                            "type": "signature_delta",
+                            "signature": reasoning['signature']
+                        }
                     }
-                }
+                # Handle thinking text
+                else:
+                    return {
+                        "type": "content_block_delta",
+                        "index": content_block_index,
+                        "delta": {
+                            "type": "thinking_delta",
+                            "thinking": reasoning.get('text', '')
+                        }
+                    }
             # Handle regular text delta
             elif 'text' in delta:
                 return {
@@ -644,10 +767,17 @@ class SAPAnthropicMessagesStreamingIterator:
         # Handle metadata -> message_delta (for usage)
         elif 'metadata' in sap_chunk:
             transformed_usage = self._transform_usage_metrics(sap_chunk.copy())
+            
+            # Extract stop information from metadata if available
+            metadata = sap_chunk.get('metadata', {})
+            stop_reason = metadata.get('stopReason', 'end_turn')
+            stop_sequence = metadata.get('stopSequence')
+            
             return {
                 "type": "message_delta",
                 "delta": {
-                    "stop_reason": "end_turn"
+                    "stop_reason": stop_reason,
+                    "stop_sequence": stop_sequence
                 },
                 "usage": transformed_usage.get('usage', {})
             }
