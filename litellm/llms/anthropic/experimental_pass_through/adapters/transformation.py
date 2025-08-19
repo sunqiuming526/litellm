@@ -164,8 +164,9 @@ class LiteLLMAnthropicMessagesAdapter:
                             )
                             new_user_content_list.append(text_obj)
                         elif content.get("type") == "image":
+                            source = content.get('source', {})
                             image_url = ChatCompletionImageUrlObject(
-                                url=f"data:{content.get('type', '')};base64,{content.get('source', '')}"
+                                url=f"data:{source.get('media_type', '')};base64,{source.get('data', '')}"
                             )
                             image_obj = ChatCompletionImageObject(
                                 type="image_url", image_url=image_url
